@@ -36,3 +36,6 @@ bin/
 .vscode/
 .DS_Store
 *Zone.Identifier
+
+# Local agent instructions
+AGENTS.md
