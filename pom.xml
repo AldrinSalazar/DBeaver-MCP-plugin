@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DBeaver MCP Server - Tycho multi-module build.
+  Produces an Eclipse p2 repository ZIP installable via
+  Help -> Install New Software -> Add -> Archive.
+
+  Build:  mvn clean verify
+  Result: repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-<release.version>.zip
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dev.astronauta</groupId>
+  <artifactId>dbeaver-mcp-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>DBeaver MCP Server (parent)</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <tycho.version>5.0.4</tycho.version>
+    <!-- Version stamped into the release ZIP name -->
+    <release.version>0.1.0</release.version>
+    <!-- Third-party libraries, embedded into the plugin bundle -->
+    <mcp.version>2.0.1</mcp.version>
+    <jetty.version>12.1.13</jetty.version>
+    <slf4j.version>2.0.19</slf4j.version>
+    <junit.version>4.13.2</junit.version>
+    <!-- Locally registered DBeaver jars (tests module only) -->
+    <dbeaver.local.version>1.0.0-local</dbeaver.local.version>
+  </properties>
+
+  <modules>
+    <module>plugins/dev.astronauta.dbeaverMCP</module>
+    <module>features/dev.astronauta.dbeaverMCP.feature</module>
+    <module>repository/dev.astronauta.dbeaverMCP.repository</module>
+    <module>tests</module>
+  </modules>
+
+  <repositories>
+    <!-- Pinned Eclipse release matching DBeaver 26.2.x (Eclipse 4.41) -->
+    <repository>
+      <id>eclipse-2026-09</id>
+      <url>https://download.eclipse.org/releases/2026-09</url>
+      <layout>p2</layout>
+    </repository>
+    <!--
+      DBeaver CE update site. No versioned CE path exists, so this moving
+      channel is used; our bundle requirements carry no version bounds,
+      so builds stay compatible across DBeaver releases.
+    -->
+    <repository>
+      <id>dbeaver-ce</id>
+      <url>https://dbeaver.io/update/latest/</url>
+      <layout>p2</layout>
+    </repository>
+  </repositories>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.eclipse.tycho</groupId>
+        <artifactId>tycho-maven-plugin</artifactId>
+        <version>${tycho.version}</version>
+        <extensions>true</extensions>
+      </plugin>
+      <plugin>
+        <groupId>org.eclipse.tycho</groupId>
+        <artifactId>target-platform-configuration</artifactId>
+        <version>${tycho.version}</version>
+        <configuration>
+          <!--
+            Wrap Maven Central dependencies as OSGi bundles so the plugin
+            module compiles against them. They are still embedded into our
+            bundle (see copy-dependencies in the plugin module), not shipped
+            as separate install units.
+          -->
+          <pomDependencies>wrapAsBundle</pomDependencies>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

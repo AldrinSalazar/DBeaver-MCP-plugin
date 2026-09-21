@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feature
+    id="dev.astronauta.dbeaverMCP.feature"
+    label="DBeaver MCP Server"
+    version="0.1.0.qualifier"
+    provider-name="astronauta">
+
+  <description>
+    Adds a Model Context Protocol (Streamable HTTP) server to DBeaver,
+    exposing your database connections to MCP clients.
+  </description>
+
+  <license url="https://opensource.org/licenses/MIT">
+    MIT License
+  </license>
+
+  <plugin
+      id="dev.astronauta.dbeaverMCP"
+      download-size="0"
+      install-size="0"
+      version="0.0.0"
+      unpack="false"/>
+
+</feature>

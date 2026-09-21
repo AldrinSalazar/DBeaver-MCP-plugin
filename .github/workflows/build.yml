@@ -1,0 +1,97 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Check Maven
+        run: mvn --version
+
+      - name: Download DBeaver CE (test jars only)
+        run: |
+          curl -sSL -o /tmp/dbeaver-ce.tar.gz https://dbeaver.io/files/dbeaver-ce-latest-linux.gtk.x86_64.tar.gz
+          mkdir -p /tmp/dbeaver-ce && tar xzf /tmp/dbeaver-ce.tar.gz -C /tmp/dbeaver-ce
+
+      - name: Register DBeaver jars for tests
+        run: ./scripts/install-dbeaver-libs.sh /tmp/dbeaver-ce/dbeaver
+
+      - name: Build p2 repository ZIP
+        run: mvn -B clean verify
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbeaver-mcp-zip
+          path: repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Download DBeaver CE (test jars only)
+        run: |
+          curl -sSL -o /tmp/dbeaver-ce.tar.gz https://dbeaver.io/files/dbeaver-ce-latest-linux.gtk.x86_64.tar.gz
+          mkdir -p /tmp/dbeaver-ce && tar xzf /tmp/dbeaver-ce.tar.gz -C /tmp/dbeaver-ce
+
+      - name: Register DBeaver jars for tests
+        run: ./scripts/install-dbeaver-libs.sh /tmp/dbeaver-ce/dbeaver
+
+      - name: Build p2 repository ZIP
+        run: mvn -B clean verify
+
+      # Release assets: the ZIP plus SHA-256 checksums (always) and a
+      # detached PGP signature + signing public key (when configured).
+      # Requires repo secrets:
+      #   GPG_PRIVATE_KEY - ASCII-armored secret key (gpg --armor --export-secret-keys KEYID)
+      #   GPG_PASSPHRASE  - key passphrase, if any
+      - name: Stage release assets
+        run: |
+          staging="$RUNNER_TEMP/release-assets"
+          mkdir -p "$staging"
+          cp repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-*.zip "$staging/"
+          cd "$staging"
+          for zip in *.zip; do sha256sum "$zip" > "$zip.sha256"; done
+
+      - name: Sign release assets (PGP)
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for zip in "$RUNNER_TEMP/release-assets"/*.zip; do
+            if [ -n "$GPG_PASSPHRASE" ]; then
+              gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" --armor --detach-sign "$zip"
+            else
+              gpg --batch --yes --armor --detach-sign "$zip"
+            fi
+          done
+          gpg --armor --export > "$RUNNER_TEMP/release-assets/dbeaver-mcp-signing-key.asc"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ runner.temp }}/release-assets/*

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+  <extension point="org.eclipse.ui.preferencePages">
+    <page
+      id="dev.astronauta.dbeaverMCP.preferences"
+      name="MCP Server"
+      class="dev.astronauta.dbeaverMCP.ui.McpPreferencePage"/>
+  </extension>
+  <extension point="org.eclipse.ui.startup">
+    <startup class="dev.astronauta.dbeaverMCP.McpStartup"/>
+  </extension>
+</plugin>

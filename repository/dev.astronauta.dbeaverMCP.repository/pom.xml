@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>dev.astronauta</groupId>
+    <artifactId>dbeaver-mcp-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>dev.astronauta.dbeaverMCP.repository</artifactId>
+  <packaging>eclipse-repository</packaging>
+
+  <name>DBeaver MCP Server (p2 repository)</name>
+
+  <build>
+    <plugins>
+      <!--
+        Suppress Tycho's own repo ZIP: the assembly below produces the
+        single canonical artifact with the exact release file name.
+      -->
+      <plugin>
+        <groupId>org.eclipse.tycho</groupId>
+        <artifactId>tycho-p2-repository-plugin</artifactId>
+        <version>${tycho.version}</version>
+        <executions>
+          <execution>
+            <id>default-archive-repository</id>
+            <phase>none</phase>
+          </execution>
+        </executions>
+      </plugin>
+      <!--
+        Zip the p2 repository with the exact release file name.
+        Bound to verify so it always runs after the repository assembly.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>3.8.0</version>
+        <executions>
+          <execution>
+            <id>repo-zip</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>assembly.xml</descriptor>
+              </descriptors>
+              <finalName>dbeaver-mcp-${release.version}</finalName>
+              <appendAssemblyId>false</appendAssemblyId>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
