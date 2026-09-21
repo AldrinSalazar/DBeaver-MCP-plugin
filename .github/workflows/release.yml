@@ -1,0 +1,173 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Download DBeaver CE (test jars only)
+        run: |
+          curl -fsSL --retry 3 -o /tmp/dbeaver-ce.tar.gz https://dbeaver.io/files/dbeaver-ce-latest-linux.gtk.x86_64.tar.gz
+          mkdir -p /tmp/dbeaver-ce && tar xzf /tmp/dbeaver-ce.tar.gz -C /tmp/dbeaver-ce
+
+      - name: Register DBeaver jars for tests
+        run: ./scripts/install-dbeaver-libs.sh /tmp/dbeaver-ce/dbeaver
+
+      - name: Validate release version
+        run: ./scripts/verify-release-version.py "$GITHUB_REF_NAME"
+
+      - name: Build and test
+        run: mvn --batch-mode clean verify
+
+      - name: Upload unsigned p2 repository
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-p2-${{ github.run_id }}
+          path: repository/dev.astronauta.dbeaverMCP.repository/target/repository
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Sign and release
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Download unsigned p2 repository
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: unsigned-p2-${{ github.run_id }}
+          path: repository/dev.astronauta.dbeaverMCP.repository/target/repository
+
+      - name: Validate signing configuration
+        env:
+          HAS_MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY != '' }}
+          MAVEN_GPG_KEY_FINGERPRINT: ${{ vars.MAVEN_GPG_KEY_FINGERPRINT }}
+        run: |
+          test "$HAS_MAVEN_GPG_KEY" = "true" || { echo "MAVEN_GPG_KEY is not configured"; exit 1; }
+          test -n "$MAVEN_GPG_KEY_FINGERPRINT" || { echo "MAVEN_GPG_KEY_FINGERPRINT is not configured"; exit 1; }
+
+      - name: Set up signing key
+        env:
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_KEY_FINGERPRINT: ${{ vars.MAVEN_GPG_KEY_FINGERPRINT }}
+        run: |
+          GNUPGHOME="$RUNNER_TEMP/release-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$MAVEN_GPG_KEY" | gpg --batch --homedir "$GNUPGHOME" --import
+          gpg --batch --homedir "$GNUPGHOME" --list-secret-keys "$MAVEN_GPG_KEY_FINGERPRINT!" >/dev/null
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+
+      - name: Sign p2 repository
+        env:
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          # Tycho 5.0.4 requires this variable even for an unencrypted key.
+          MAVEN_GPG_PASSPHRASE: unused
+          MAVEN_GPG_KEY_FINGERPRINT: ${{ vars.MAVEN_GPG_KEY_FINGERPRINT }}
+        run: |
+          repository_module="$PWD/repository/dev.astronauta.dbeaverMCP.repository"
+          mvn --batch-mode -f "$repository_module/pom.xml" \
+            org.eclipse.tycho:tycho-gpg-plugin:5.0.4:sign-p2-artifacts \
+            -Dtycho.pgp.signer=bc \
+            -Dgpg.keyname="$MAVEN_GPG_KEY_FINGERPRINT" \
+            -Dgpg.bestPractices=true
+
+          release_zip="$repository_module/target/dbeaver-mcp-${GITHUB_REF_NAME#v}.zip"
+          rm -f "$release_zip"
+          jar --create --file "$release_zip" --no-manifest \
+            -C "$repository_module/target/repository" .
+
+      - name: Check p2 install metadata
+        run: |
+          zips=(repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-*.zip)
+          test "${#zips[@]}" -eq 1 || { echo "Expected exactly one release ZIP"; exit 1; }
+          python3 - "${zips[0]}" <<'PY'
+          import io
+          import sys
+          import xml.etree.ElementTree as ET
+          import zipfile
+
+          with zipfile.ZipFile(sys.argv[1]) as release:
+              artifacts_jar = release.read("artifacts.jar")
+          with zipfile.ZipFile(io.BytesIO(artifacts_jar)) as metadata:
+              root = ET.fromstring(metadata.read("artifacts.xml"))
+
+          repository_properties = {
+              item.attrib["name"]: item.attrib["value"]
+              for item in root.findall("./properties/property")
+          }
+          if "pgp.publicKeys" not in repository_properties:
+              raise SystemExit("p2 repository has no embedded public key")
+
+          artifacts = root.findall("./artifacts/artifact")
+          if not artifacts:
+              raise SystemExit("p2 repository contains no artifacts")
+          for artifact in artifacts:
+              properties = {
+                  item.attrib["name"]: item.attrib["value"]
+                  for item in artifact.findall("./properties/property")
+              }
+              if "pgp.signatures" not in properties:
+                  raise SystemExit(f"unsigned p2 artifact: {artifact.attrib}")
+          print(f"Found signatures on all {len(artifacts)} p2 artifacts")
+          PY
+
+      - name: Create draft release and upload ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft > "$RUNNER_TEMP/release-is-draft" 2>/dev/null; then
+            test "$(cat "$RUNNER_TEMP/release-is-draft")" = "true" || {
+              echo "Release $GITHUB_REF_NAME is already published"
+              exit 1
+            }
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes --verify-tag
+          fi
+          zips=(repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-*.zip)
+          gh release upload "$GITHUB_REF_NAME" "${zips[0]}" --clobber
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

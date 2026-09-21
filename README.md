@@ -67,14 +67,14 @@ mvn clean verify
 This produces the installable p2 repository ZIP (self-contained plugin ~9 MB plus repository metadata):
 
 ```text
-repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-0.1.0.zip
+repository/dev.astronauta.dbeaverMCP.repository/target/dbeaver-mcp-X.Y.Z.zip
 ```
 
 The build is a Tycho multi-module reactor (`plugins/`, `features/`, `repository/`, `tests/`). Eclipse and DBeaver APIs resolve from p2 (pinned Eclipse 2026-09 release plus the DBeaver CE update site); third-party libraries (MCP SDK, Jetty, Jackson, Reactor) are embedded inside the plugin bundle.
 
 ## Install
 
-1. Download `dbeaver-mcp-0.1.0.zip` from the project's release page (or build it above).
+1. Download `dbeaver-mcp-X.Y.Z.zip` from the project's release page (or build it above).
 2. In DBeaver, open **Help → Install New Software…**.
 3. Click **Add… → Archive…** and select the ZIP.
 4. Tick **DBeaver MCP → DBeaver MCP Server**, click **Next**, review, **Finish**.
@@ -86,18 +86,6 @@ The build is a Tycho multi-module reactor (`plugins/`, `features/`, `repository/
    - The server starts automatically; *Start now* / *Stop* override it.
 
 To uninstall: **Help → About DBeaver → Installation Details → Installed Software**, select **DBeaver MCP Server**, **Uninstall**, restart. To upgrade, install the newer ZIP the same way.
-
-## Verifying releases
-
-Release ZIPs ship with SHA-256 checksums (`.zip.sha256`) and, when signing is configured, a detached PGP signature (`.zip.asc`) plus the signing public key (`dbeaver-mcp-signing-key.asc`). Download them alongside the ZIP from the release page, then:
-
-```bash
-sha256sum -c dbeaver-mcp-0.1.0.zip.sha256
-gpg --import dbeaver-mcp-signing-key.asc
-gpg --verify dbeaver-mcp-0.1.0.zip.asc dbeaver-mcp-0.1.0.zip
-```
-
-Signing requires the repository secrets `GPG_PRIVATE_KEY` (ASCII-armored secret key, `gpg --armor --export-secret-keys KEYID`) and `GPG_PASSPHRASE` if the key has one; without them releases carry checksums only.
 
 ## Client configuration
 
@@ -217,5 +205,5 @@ For clients that only speak stdio, put any stdio→HTTP MCP proxy in front (e.g.
 - Java 21 throughout; Eclipse/DBeaver APIs come from the p2 target platform, third-party libs from Maven Central (embedded under the bundle's `lib/`).
 - `mvn test` runs unit tests plus a live Streamable-HTTP round-trip test (boots the real Jetty + MCP stack on an ephemeral port). The tests module needs the two DBeaver jars from `scripts/install-dbeaver-libs.*`.
 - When upgrading a third-party dependency version, sync the explicit artifact list in the plugin `pom.xml` **and** `Bundle-ClassPath` in `META-INF/MANIFEST.MF` with the new file names.
-- Releases: bump the Maven/OSGi versions together with the `release.version` property, tag `vX.Y.Z`, and publish `dbeaver-mcp-X.Y.Z.zip` — CI attaches checksums and, when the GPG secrets are configured (see [Verifying releases](#verifying-releases)), a PGP signature and the signing public key (`mvn tycho-versions:set-version` can bump Tycho versions).
+- Releases: run `python3 scripts/set-version.py X.Y.Z`, commit the result, then tag that commit exactly `vX.Y.Z`. Only the tag publishes `dbeaver-mcp-X.Y.Z.zip`.
 - Key classes: `db.DBeaverBridge` (all DBeaver access), `db.SqlGuard` (read/write classification), `db.ValueRenderer` (DB values → JSON-safe data), `db.readonly.*` (database-specific read-only enforcement), `server.McpServerManager` (Jetty + MCP wiring), `server.tools.*` (one class per MCP tool, `Schema` builder for input schemas, `ToolArgs` for arguments), `ui.McpPreferencePage` (config UI).

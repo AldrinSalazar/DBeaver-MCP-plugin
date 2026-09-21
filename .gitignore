@@ -9,6 +9,16 @@ lib/
 # Release archives if ever copied to the repo root
 *.zip
 
+# Local credentials and signing material
+*.asc
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+
 # Logs
 *.log
 
