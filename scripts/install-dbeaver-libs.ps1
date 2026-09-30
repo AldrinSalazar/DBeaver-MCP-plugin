@@ -27,7 +27,9 @@ if (-not (Test-Path $pluginsDir)) {
 
 $bundles = @(
   "org.jkiss.dbeaver.model",
-  "org.jkiss.utils"
+  "org.jkiss.utils",
+  "org.jkiss.dbeaver.model.jdbc",
+  "org.eclipse.osgi"
 )
 
 $installed = 0

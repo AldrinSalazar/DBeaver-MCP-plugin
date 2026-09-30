@@ -7,8 +7,7 @@ import java.util.Set;
  * Database-specific read-only enforcement for {@code query_sql}.
  *
  * <p>Strategies run on an isolated JDBC connection owned by a single MCP
- * request. {@link #begin} must throw on any failure so the query fails
- * closed; {@link #end} is cleanup only and must never throw.
+ * request. Establishment and cleanup failures both fail the query.
  */
 public interface ReadOnlyStrategy {
 
@@ -31,5 +30,20 @@ public interface ReadOnlyStrategy {
 
     void begin(Connection connection) throws Exception;
 
-    void end(Connection connection);
+    void end(Connection connection) throws Exception;
+
+    /** Cleanup runs even after partial establishment; preserves the original failure. */
+    default AutoCloseable protect(Connection connection) throws Exception {
+        try {
+            begin(connection);
+        } catch (Exception failure) {
+            try {
+                end(connection);
+            } catch (Exception cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
+        return () -> end(connection);
+    }
 }

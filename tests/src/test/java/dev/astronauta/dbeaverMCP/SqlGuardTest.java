@@ -5,6 +5,8 @@ import static org.junit.Assert.assertThrows;
 
 import dev.astronauta.dbeaverMCP.db.BridgeException;
 import dev.astronauta.dbeaverMCP.db.SqlGuard;
+import dev.astronauta.dbeaverMCP.db.SqlGuard.Dialect;
+import java.util.Locale;
 import org.junit.Test;
 
 public class SqlGuardTest {
@@ -70,5 +72,70 @@ public class SqlGuardTest {
         assertEquals(SqlGuard.Kind.READ, SqlGuard.check("EXPLAIN SELECT * FROM t", false).kind());
         assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT 1 -- delete from t", false).kind());
         assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT deleted_flag FROM t", false).kind());
+    }
+
+    @Test
+    public void trailingCommentsDoNotBecomeStatements() throws Exception {
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT 1; -- end", false).kind());
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT 1; /* end */", false).kind());
+        assertThrows(BridgeException.class, () -> SqlGuard.check("/* comment only */", false));
+    }
+
+    @Test
+    public void dialectQuotingPreservesStatementBoundaries() throws Exception {
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT $$a;b$$", false, Dialect.POSTGRESQL).kind());
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT $tag$insert;delete$tag$", false, Dialect.POSTGRESQL).kind());
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT [into;delete] FROM t", false, Dialect.SQL_SERVER).kind());
+        assertEquals(SqlGuard.Kind.READ, SqlGuard.check("SELECT `into;delete` FROM t", false, Dialect.MYSQL).kind());
+        assertThrows(BridgeException.class,
+            () -> SqlGuard.check("SELECT $$a;b$$; DELETE FROM t", true, Dialect.POSTGRESQL));
+    }
+
+    @Test
+    public void modifyingReadsAndExecutableCommentsAreRejected() {
+        assertThrows(BridgeException.class, () -> SqlGuard.check("EXPLAIN ANALYZE SELECT * INTO backup FROM t", false));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("WITH x AS (SELECT 1) SELECT * INTO backup FROM x", false));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT 1 /*!; DELETE FROM t */", true, Dialect.MYSQL));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT 1--1; DELETE FROM t", true, Dialect.MYSQL));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT 1--\u2000x; DELETE FROM t", true, Dialect.MYSQL));
+    }
+
+    @Test
+    public void keywordChecksDoNotDependOnTurkishLocale() {
+        Locale previous = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            assertThrows(BridgeException.class,
+                () -> SqlGuard.check("with x as (insert into t values (1) returning *) select * from x", false));
+        } finally {
+            Locale.setDefault(previous);
+        }
+    }
+
+    @Test
+    public void malformedQuotesAndCommentsFailClosed() {
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT 'unterminated", false));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT 1 /* unterminated", false));
+        assertThrows(BridgeException.class, () -> SqlGuard.check("SELECT $$unterminated", false, Dialect.POSTGRESQL));
+    }
+
+    @Test
+    public void modeDependentBackslashQuotesFailClosed() throws Exception {
+        assertThrows(BridgeException.class,
+            () -> SqlGuard.check("SELECT 'a\\b'", true, Dialect.MYSQL));
+        assertThrows(BridgeException.class,
+            () -> SqlGuard.check("SELECT \"a\\b\"", true, Dialect.MYSQL));
+        assertThrows(BridgeException.class,
+            () -> SqlGuard.check("SELECT 'a\\b'", true, Dialect.POSTGRESQL));
+        assertEquals(SqlGuard.Kind.READ,
+            SqlGuard.check("SELECT E'a\\b'", false, Dialect.POSTGRESQL).kind());
+        assertEquals(SqlGuard.Kind.READ,
+            SqlGuard.check("SELECT 'a''b'", false, Dialect.MYSQL).kind());
+    }
+
+    @Test
+    public void mariaDbExecutableCommentsAreRejected() {
+        assertThrows(BridgeException.class,
+            () -> SqlGuard.check("SELECT 1 /*M!; DELETE FROM t */", true, Dialect.MYSQL));
     }
 }

@@ -1,5 +1,6 @@
 package dev.astronauta.dbeaverMCP.db;
 
+import java.io.Reader;
 import java.sql.Array;
 import java.sql.Blob;
 import java.sql.Clob;
@@ -26,6 +27,10 @@ public final class ValueRenderer {
     }
 
     public static Object render(Object value) {
+        return render(value, 0);
+    }
+
+    private static Object render(Object value, int depth) {
         if (value == null) {
             return null;
         }
@@ -55,7 +60,7 @@ public final class ValueRenderer {
         }
         if (value instanceof Clob clob) {
             try {
-                long length = Math.min(clob.length(), MAX_LOB_BYTES);
+                long length = Math.min(clob.length(), MAX_VALUE_CHARS + 1L);
                 String text = clob.getSubString(1, (int) length);
                 Map<String, Object> map = new LinkedHashMap<>();
                 map.put("clob", truncate(text, MAX_VALUE_CHARS));
@@ -67,35 +72,39 @@ public final class ValueRenderer {
         }
         if (value instanceof Blob blob) {
             try {
-                long length = Math.min(blob.length(), MAX_LOB_BYTES);
-                byte[] bytes = blob.getBytes(1, (int) length);
-                Map<String, Object> map = new LinkedHashMap<>(renderBytes(bytes));
-                map.put("truncated", blob.length() > length);
+                long length = blob.length();
+                Map<String, Object> map = new LinkedHashMap<>();
+                if (length <= 65536) {
+                    map.putAll(renderBytes(blob.getBytes(1, (int) length)));
+                } else {
+                    map.put("binary", "<" + length + " bytes, too large to inline>");
+                }
+                map.put("byteLength", length);
+                map.put("truncated", length > 65536);
                 return map;
             } catch (Exception e) {
                 return "<unreadable BLOB: " + e.getMessage() + ">";
             }
         }
         if (value instanceof SQLXML xml) {
-            try {
-                return truncate(String.valueOf(xml.getString()), MAX_VALUE_CHARS);
+            try (Reader reader = xml.getCharacterStream()) {
+                return boundedText(reader);
             } catch (Exception e) {
                 return "<unreadable XML: " + e.getMessage() + ">";
             }
         }
         if (value instanceof Array array) {
-            try {
-                Object raw = array.getArray();
+            if (depth > 0) {
+                return "<nested ARRAY omitted>";
+            }
+            try (var elements = array.getResultSet()) {
                 List<Object> items = new ArrayList<>();
-                if (raw instanceof Object[] objects) {
-                    for (int i = 0; i < objects.length && i < 100; i++) {
-                        items.add(render(objects[i]));
+                while (elements.next()) {
+                    if (items.size() == 100) {
+                        items.add("<... truncated after 100 elements>");
+                        break;
                     }
-                    if (objects.length > 100) {
-                        items.add("<... " + (objects.length - 100) + " more>");
-                    }
-                } else {
-                    items.add(truncate(String.valueOf(raw), MAX_VALUE_CHARS));
+                    items.add(render(elements.getObject(2), depth + 1));
                 }
                 return items;
             } catch (Exception e) {
@@ -103,6 +112,20 @@ public final class ValueRenderer {
             }
         }
         return truncate(String.valueOf(value), MAX_VALUE_CHARS);
+    }
+
+    private static String boundedText(Reader reader) throws Exception {
+        char[] buffer = new char[MAX_VALUE_CHARS + 1];
+        int length = 0;
+        while (length < buffer.length) {
+            int count = reader.read(buffer, length, buffer.length - length);
+            if (count < 0) {
+                break;
+            }
+            length += count;
+        }
+        String text = new String(buffer, 0, Math.min(length, MAX_VALUE_CHARS));
+        return length > MAX_VALUE_CHARS ? text + "...<truncated>" : text;
     }
 
     static String truncate(String value, int max) {

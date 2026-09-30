@@ -24,6 +24,8 @@ PLUGINS="$DBEAVER_DIR/plugins"
 BUNDLES=(
   org.jkiss.dbeaver.model
   org.jkiss.utils
+  org.jkiss.dbeaver.model.jdbc
+  org.eclipse.osgi
 )
 
 installed=0

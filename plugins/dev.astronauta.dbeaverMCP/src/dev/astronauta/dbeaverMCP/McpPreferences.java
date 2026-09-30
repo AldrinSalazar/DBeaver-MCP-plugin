@@ -3,7 +3,8 @@ package dev.astronauta.dbeaverMCP;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
-import java.util.UUID;
+
+import dev.astronauta.dbeaverMCP.db.AccessPolicy;
 
 import org.eclipse.core.runtime.preferences.InstanceScope;
 import org.osgi.service.prefs.BackingStoreException;
@@ -131,8 +132,7 @@ public class McpPreferences {
     public synchronized String ensureToken() {
         String token = getToken();
         if (token == null || token.isBlank()) {
-            token = UUID.randomUUID().toString().replace("-", "")
-                + UUID.randomUUID().toString().replace("-", "");
+            token = ServerSettings.newToken();
             setToken(token);
             save();
         }
@@ -184,7 +184,7 @@ public class McpPreferences {
     }
 
     public boolean isMetadataGranted(String connectionId) {
-        return connectionId != null && getMetadataIds().contains(connectionId);
+        return accessPolicy().canExpose(connectionId);
     }
 
     public boolean isReadGranted(String connectionId) {
@@ -196,15 +196,19 @@ public class McpPreferences {
     }
 
     public boolean canRead(String connectionId) {
-        return getAccessMode() != AccessMode.METADATA_ONLY && isReadGranted(connectionId);
+        return accessPolicy().canRead(connectionId);
     }
 
     public boolean canWrite(String connectionId) {
-        return getAccessMode() == AccessMode.READ_WRITE && isWriteGranted(connectionId);
+        return accessPolicy().canWrite(connectionId, false);
     }
 
     public boolean canExpose(String connectionId) {
-        return isMetadataGranted(connectionId) || isReadGranted(connectionId) || isWriteGranted(connectionId);
+        return accessPolicy().canExpose(connectionId);
+    }
+
+    public AccessPolicy accessPolicy() {
+        return new AccessPolicy(getAccessMode(), getMetadataIds(), getReadIds(), getWriteIds());
     }
 
     private Set<String> getIdSet(String key) {

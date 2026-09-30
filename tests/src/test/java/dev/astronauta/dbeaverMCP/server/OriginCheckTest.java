@@ -13,40 +13,40 @@ public class OriginCheckTest {
 
     @Test
     public void allowsExactLoopbackOrigins() {
-        assertTrue(McpServerManager.isLocalOrigin("http://localhost"));
-        assertTrue(McpServerManager.isLocalOrigin("http://localhost:3000"));
-        assertTrue(McpServerManager.isLocalOrigin("https://localhost:5173"));
-        assertTrue(McpServerManager.isLocalOrigin("http://LOCALHOST:8080"));
-        assertTrue(McpServerManager.isLocalOrigin("http://localhost.:4200"));
-        assertTrue(McpServerManager.isLocalOrigin("http://127.0.0.1"));
-        assertTrue(McpServerManager.isLocalOrigin("https://127.0.0.1:8443"));
-        assertTrue(McpServerManager.isLocalOrigin("http://[::1]:4200"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://localhost"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://localhost:3000"));
+        assertTrue(TransportSecurity.isLocalOrigin("https://localhost:5173"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://LOCALHOST:8080"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://localhost.:4200"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://127.0.0.1"));
+        assertTrue(TransportSecurity.isLocalOrigin("https://127.0.0.1:8443"));
+        assertTrue(TransportSecurity.isLocalOrigin("http://[::1]:4200"));
     }
 
     @Test
     public void rejectsPrefixLookalikeHosts() {
-        assertFalse(McpServerManager.isLocalOrigin("http://localhost.evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("http://127.0.0.1.evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("http://localhost-evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("https://localhost.evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("http://sub.localhost.evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://localhost.evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://127.0.0.1.evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://localhost-evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("https://localhost.evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://sub.localhost.evil.com"));
     }
 
     @Test
     public void rejectsRemoteAndNonHttpOrigins() {
-        assertFalse(McpServerManager.isLocalOrigin("http://evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("http://evil.com:4319"));
-        assertFalse(McpServerManager.isLocalOrigin("https://127.0.0.1.evil.com"));
-        assertFalse(McpServerManager.isLocalOrigin("ftp://localhost"));
-        assertFalse(McpServerManager.isLocalOrigin("chrome-extension://abcdef"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://evil.com:4319"));
+        assertFalse(TransportSecurity.isLocalOrigin("https://127.0.0.1.evil.com"));
+        assertFalse(TransportSecurity.isLocalOrigin("ftp://localhost"));
+        assertFalse(TransportSecurity.isLocalOrigin("chrome-extension://abcdef"));
     }
 
     @Test
     public void rejectsAbsentUnparseableOrNullStringOrigins() {
-        assertFalse(McpServerManager.isLocalOrigin(null));
-        assertFalse(McpServerManager.isLocalOrigin("  "));
-        assertFalse(McpServerManager.isLocalOrigin("null"));
-        assertFalse(McpServerManager.isLocalOrigin("http://local host"));
-        assertFalse(McpServerManager.isLocalOrigin("not a url"));
+        assertFalse(TransportSecurity.isLocalOrigin(null));
+        assertFalse(TransportSecurity.isLocalOrigin("  "));
+        assertFalse(TransportSecurity.isLocalOrigin("null"));
+        assertFalse(TransportSecurity.isLocalOrigin("http://local host"));
+        assertFalse(TransportSecurity.isLocalOrigin("not a url"));
     }
 }

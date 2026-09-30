@@ -1,20 +1,24 @@
 package dev.astronauta.dbeaverMCP.ui;
 
-import java.net.InetAddress;
+
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
+
 
 import dev.astronauta.dbeaverMCP.McpPlugin;
 import dev.astronauta.dbeaverMCP.McpPreferences;
 import dev.astronauta.dbeaverMCP.McpPreferences.AccessMode;
+import dev.astronauta.dbeaverMCP.ServerSettings;
+import dev.astronauta.dbeaverMCP.db.AccessPolicy;
 import dev.astronauta.dbeaverMCP.db.BridgeException;
 import dev.astronauta.dbeaverMCP.db.DBeaverBridge;
-import dev.astronauta.dbeaverMCP.db.DBeaverBridge.ConnectionEntry;
+import dev.astronauta.dbeaverMCP.db.ConnectionCatalog.ConnectionEntry;
 import dev.astronauta.dbeaverMCP.db.readonly.ReadOnlyStrategies;
 import dev.astronauta.dbeaverMCP.server.McpServerManager;
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.layout.GridLayoutFactory;
 import org.eclipse.jface.preference.PreferencePage;
@@ -40,6 +44,7 @@ import org.eclipse.swt.widgets.TableColumn;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
+import org.eclipse.ui.statushandlers.StatusManager;
 
 /**
  * Window > Preferences > MCP Server.
@@ -72,9 +77,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
     private Button writeCheck;
 
     private List<ConnectionEntry> allConnections = new ArrayList<>();
-    private Set<String> metadataIds = new LinkedHashSet<>();
-    private Set<String> readIds = new LinkedHashSet<>();
-    private Set<String> writeIds = new LinkedHashSet<>();
+    private ConnectionGrants grants;
     private ConnectionEntry selected;
 
     public McpPreferencePage() {
@@ -150,7 +153,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         GridDataFactory.fillDefaults().grab(true, false).applyTo(tokenText);
         regenerateButton = new Button(group, SWT.PUSH);
         regenerateButton.setText("Regenerate");
-        regenerateButton.addListener(SWT.Selection, e -> tokenText.setText(randomToken()));
+        regenerateButton.addListener(SWT.Selection, e -> tokenText.setText(ServerSettings.newToken()));
         copyButton = new Button(group, SWT.PUSH);
         copyButton.setText("Copy");
         copyButton.addListener(SWT.Selection, e -> copyTokenToClipboard());
@@ -165,19 +168,15 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         Button startButton = new Button(buttons, SWT.PUSH);
         startButton.setText("Start now");
         startButton.addListener(SWT.Selection, e -> {
-            saveValues();
-            try {
-                McpServerManager.getInstance().start();
-            } catch (Exception ex) {
-                McpPlugin.logError("Failed to start MCP server", ex);
+            if (saveValues()) {
+                runServerAction("Starting MCP server", () -> McpServerManager.getInstance().restartNow());
             }
-            updateStatus();
         });
         Button stopButton = new Button(buttons, SWT.PUSH);
         stopButton.setText("Stop");
         stopButton.addListener(SWT.Selection, e -> {
-            McpServerManager.getInstance().stop();
-            updateStatus();
+            McpServerManager.getInstance().cancelAutoStart();
+            runServerAction("Stopping MCP server", () -> McpServerManager.getInstance().stop());
         });
         statusLabel = new Label(buttons, SWT.NONE);
         GridDataFactory.fillDefaults().grab(true, false).applyTo(statusLabel);
@@ -246,11 +245,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         enableAll.setText("Enable all");
         GridDataFactory.fillDefaults().grab(true, false).applyTo(enableAll);
         enableAll.addListener(SWT.Selection, e -> {
-            for (ConnectionEntry entry : allConnections) {
-                metadataIds.add(entry.id());
-                readIds.add(entry.id());
-                writeIds.add(entry.id());
-            }
+            grants.enableAll(allConnections, selectedMode());
             updateGrantChecks();
             connectionsViewer.refresh();
         });
@@ -258,9 +253,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         disableAll.setText("Disable all");
         GridDataFactory.fillDefaults().grab(true, false).applyTo(disableAll);
         disableAll.addListener(SWT.Selection, e -> {
-            metadataIds.clear();
-            readIds.clear();
-            writeIds.clear();
+            grants.clear();
             updateGrantChecks();
             connectionsViewer.refresh();
         });
@@ -279,9 +272,9 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         readCheck.setText("Read-only queries");
         writeCheck = new Button(grantsGroup, SWT.CHECK);
         writeCheck.setText("Write queries");
-        metadataCheck.addListener(SWT.Selection, e -> toggleGrant(metadataIds, metadataCheck.getSelection()));
-        readCheck.addListener(SWT.Selection, e -> toggleGrant(readIds, readCheck.getSelection()));
-        writeCheck.addListener(SWT.Selection, e -> toggleGrant(writeIds, writeCheck.getSelection()));
+        metadataCheck.addListener(SWT.Selection, e -> editGrants(() -> grants.setMetadata(selected.id(), metadataCheck.getSelection())));
+        readCheck.addListener(SWT.Selection, e -> editGrants(() -> grants.setRead(selected.id(), readCheck.getSelection())));
+        writeCheck.addListener(SWT.Selection, e -> editGrants(() -> grants.setWrite(selected.id(), writeCheck.getSelection())));
     }
 
     private AccessMode selectedMode() {
@@ -300,7 +293,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         boolean hasSelection = selected != null;
         metadataCheck.setEnabled(hasSelection);
         readCheck.setEnabled(hasSelection && mode != AccessMode.METADATA_ONLY);
-        writeCheck.setEnabled(hasSelection && mode == AccessMode.READ_WRITE);
+        writeCheck.setEnabled(hasSelection && mode == AccessMode.READ_WRITE && !selected.readOnly());
     }
 
     /**
@@ -340,11 +333,9 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         if (host == null || host.isBlank()) {
             return true;
         }
-        try {
-            return InetAddress.getByName(host.trim()).isLoopbackAddress();
-        } catch (Exception e) {
-            return false;
-        }
+        // No DNS lookups on the SWT thread. Treat other names conservatively.
+        return Set.of("localhost", "localhost.", "127.0.0.1", "::1", "[::1]")
+            .contains(host.trim().toLowerCase(java.util.Locale.ROOT));
     }
 
     private void copyTokenToClipboard() {
@@ -366,37 +357,36 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
             writeCheck.setSelection(false);
         } else {
             grantsGroup.setText("Access for '" + selected.name() + "'");
-            metadataCheck.setSelection(metadataIds.contains(selected.id()));
-            readCheck.setSelection(readIds.contains(selected.id()));
-            writeCheck.setSelection(writeIds.contains(selected.id()));
+            AccessPolicy policy = grants.snapshot(selectedMode());
+            metadataCheck.setSelection(policy.canExpose(selected.id()));
+            readCheck.setSelection(policy.readIds().contains(selected.id()));
+            writeCheck.setSelection(policy.writeIds().contains(selected.id()));
         }
         updateGrantEnablement();
     }
 
-    private void toggleGrant(Set<String> ids, boolean grant) {
+    private void editGrants(Runnable edit) {
         if (selected == null) {
             return;
         }
-        if (grant) {
-            ids.add(selected.id());
-        } else {
-            ids.remove(selected.id());
-        }
+        edit.run();
+        updateGrantChecks();
         connectionsViewer.refresh();
     }
 
     private String accessSummary(String connectionId) {
-        List<String> grants = new ArrayList<>();
-        if (metadataIds.contains(connectionId)) {
-            grants.add("Metadata");
+        AccessPolicy policy = grants.snapshot(selectedMode());
+        List<String> labels = new ArrayList<>();
+        if (policy.canExpose(connectionId)) {
+            labels.add("Metadata");
         }
-        if (readIds.contains(connectionId)) {
-            grants.add("Read");
+        if (policy.readIds().contains(connectionId)) {
+            labels.add("Read");
         }
-        if (writeIds.contains(connectionId)) {
-            grants.add("Write");
+        if (policy.writeIds().contains(connectionId)) {
+            labels.add("Write");
         }
-        return grants.isEmpty() ? "None" : String.join(", ", grants);
+        return labels.isEmpty() ? "None" : String.join(", ", labels);
     }
 
     private void loadValues() {
@@ -409,19 +399,13 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         authCheck.setSelection(prefs.isAuthEnabled());
         String token = prefs.getToken();
         if (token == null || token.isBlank()) {
-            token = randomToken();
+            token = ServerSettings.newToken();
         }
         tokenText.setText(token);
         updateAuthState();
         updateHostWarning();
-        switch (prefs.getAccessMode()) {
-            case METADATA_ONLY -> metadataModeRadio.setSelection(true);
-            case READ_WRITE -> writeModeRadio.setSelection(true);
-            default -> readModeRadio.setSelection(true);
-        }
-        metadataIds = new LinkedHashSet<>(prefs.getMetadataIds());
-        readIds = new LinkedHashSet<>(prefs.getReadIds());
-        writeIds = new LinkedHashSet<>(prefs.getWriteIds());
+        selectMode(prefs.getAccessMode());
+        grants = new ConnectionGrants(prefs.accessPolicy());
         refreshConnections();
     }
 
@@ -453,66 +437,75 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
             return;
         }
         McpServerManager manager = McpServerManager.getInstance();
-        String text = manager.isRunning() ? "Status: " + manager.getStatus() : "Status: stopped";
+        String text = "Status: " + manager.getStatus();
         statusLabel.setText(text);
         statusLabel.getParent().layout();
     }
 
+    private void selectMode(AccessMode mode) {
+        metadataModeRadio.setSelection(mode == AccessMode.METADATA_ONLY);
+        readModeRadio.setSelection(mode == AccessMode.READ_ONLY);
+        writeModeRadio.setSelection(mode == AccessMode.READ_WRITE);
+    }
+
     private boolean saveValues() {
-        int port;
+        ServerSettings settings;
         try {
-            port = Integer.parseInt(portText.getText().trim());
-        } catch (NumberFormatException e) {
-            setErrorMessage("Port must be a number between 1 and 65535");
+            settings = ServerSettings.parse(enabledCheck.getSelection(), autoStartCheck.getSelection(),
+                hostText.getText(), portText.getText(), authCheck.getSelection(), tokenText.getText(),
+                timeoutText.getText());
+        } catch (IllegalArgumentException e) {
+            setErrorMessage(e.getMessage());
             return false;
         }
-        if (port < 1 || port > 65535) {
-            setErrorMessage("Port must be a number between 1 and 65535");
-            return false;
-        }
-        int timeout;
-        try {
-            timeout = Integer.parseInt(timeoutText.getText().trim());
-        } catch (NumberFormatException e) {
-            setErrorMessage("Query timeout must be a number of seconds (0 disables it)");
-            return false;
-        }
-        if (timeout < 0 || timeout > 86400) {
-            setErrorMessage("Query timeout must be between 0 and 86400 seconds");
-            return false;
-        }
-        String bindHost = hostText.getText().trim();
-        if (bindHost.isEmpty()) {
-            bindHost = McpPreferences.DEFAULT_BIND_HOST;
-            hostText.setText(bindHost);
-        } else {
-            try {
-                InetAddress.getByName(bindHost);
-            } catch (Exception e) {
-                setErrorMessage("Listen host is not a valid host name or IP address");
-                return false;
-            }
-        }
-        String token = tokenText.getText().trim();
-        if (token.isEmpty()) {
-            token = randomToken();
-            tokenText.setText(token);
-        }
+        hostText.setText(settings.host());
+        tokenText.setText(settings.token());
         McpPreferences prefs = new McpPreferences();
-        prefs.setServerEnabled(enabledCheck.getSelection());
-        prefs.setAutoStart(autoStartCheck.getSelection());
-        prefs.setPort(port);
-        prefs.setBindHost(bindHost);
-        prefs.setQueryTimeoutSec(timeout);
-        prefs.setAuthEnabled(authCheck.getSelection());
-        prefs.setToken(token);
+        settings.saveTo(prefs);
         prefs.setAccessMode(selectedMode());
-        prefs.setMetadataIds(metadataIds);
-        prefs.setReadIds(readIds);
-        prefs.setWriteIds(writeIds);
+        AccessPolicy policy = grants.snapshot(selectedMode());
+        prefs.setMetadataIds(policy.metadataIds());
+        prefs.setReadIds(policy.readIds());
+        prefs.setWriteIds(policy.writeIds());
         prefs.save();
         setErrorMessage(null);
         return true;
+    }
+
+    @FunctionalInterface
+    private interface ServerAction {
+        void run() throws Exception;
+    }
+
+    private void runServerAction(String name, ServerAction action) {
+        statusLabel.setText(name + "...");
+        var display = statusLabel.getDisplay();
+        Job job = Job.create(name, monitor -> {
+            String failure = null;
+            try {
+                action.run();
+            } catch (Exception e) {
+                McpPlugin.logError(name + " failed", e);
+                failure = e.getMessage() == null || e.getMessage().isBlank()
+                    ? name + " failed: " + e.getClass().getSimpleName() : e.getMessage();
+            }
+            String error = failure;
+            if (!display.isDisposed()) {
+                display.asyncExec(() -> {
+                    if (!statusLabel.isDisposed()) {
+                        setErrorMessage(error);
+                        updateStatus();
+                    } else if (error != null) {
+                        StatusManager.getManager().handle(
+                            new Status(IStatus.ERROR, McpPlugin.PLUGIN_ID, error), StatusManager.SHOW);
+                    }
+                });
+            }
+            return error == null ? Status.OK_STATUS : new Status(IStatus.ERROR, McpPlugin.PLUGIN_ID, error);
+        });
+        job.setRule(McpServerManager.LIFECYCLE_RULE);
+        job.setSystem(true);
+        job.schedule();
     }
 
     @Override
@@ -520,19 +513,8 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         if (!saveValues()) {
             return false;
         }
-        McpServerManager manager = McpServerManager.getInstance();
-        try {
-            if (!enabledCheck.getSelection()) {
-                manager.stop();
-            } else {
-                manager.restart();
-            }
-        } catch (Exception e) {
-            McpPlugin.logError("Failed to apply MCP server settings", e);
-            setErrorMessage("Settings saved, but the server failed to start: " + e.getMessage());
-            return false;
-        }
-        updateStatus();
+        McpServerManager.getInstance().cancelAutoStart();
+        runServerAction("Applying MCP server settings", () -> McpServerManager.getInstance().restart());
         return super.performOk();
     }
 
@@ -546,17 +528,11 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         authCheck.setSelection(McpPreferences.DEFAULT_AUTH_ENABLED);
         updateAuthState();
         updateHostWarning();
-        readModeRadio.setSelection(true);
-        metadataIds.clear();
-        readIds.clear();
-        writeIds.clear();
+        selectMode(McpPreferences.DEFAULT_ACCESS_MODE);
+        grants.clear();
         updateGrantChecks();
+        connectionsViewer.refresh();
         super.performDefaults();
-    }
-
-    private static String randomToken() {
-        return UUID.randomUUID().toString().replace("-", "")
-            + UUID.randomUUID().toString().replace("-", "");
     }
 
     private final class ConnectionLabelProvider extends LabelProvider implements ITableLabelProvider {

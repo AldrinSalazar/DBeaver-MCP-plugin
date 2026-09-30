@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   Plain unit tests (no OSGi runtime needed). Requires the DBeaver jars
-  registered by scripts/install-dbeaver-libs.* (model + utils only).
+  registered by scripts/install-dbeaver-libs.* (model, JDBC model, utils, OSGi).
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -55,6 +55,16 @@
     <dependency>
       <groupId>dbeaver.local</groupId>
       <artifactId>org.jkiss.utils</artifactId>
+      <version>${dbeaver.local.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dbeaver.local</groupId>
+      <artifactId>org.jkiss.dbeaver.model.jdbc</artifactId>
+      <version>${dbeaver.local.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>dbeaver.local</groupId>
+      <artifactId>org.eclipse.osgi</artifactId>
       <version>${dbeaver.local.version}</version>
     </dependency>
     <dependency>
