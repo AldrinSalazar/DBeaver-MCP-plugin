@@ -6,6 +6,7 @@ import java.util.Map;
 import java.nio.charset.StandardCharsets;
 
 import dev.astronauta.dbeaverMCP.db.BridgeException;
+import dev.astronauta.dbeaverMCP.PluginInfo;
 import dev.astronauta.dbeaverMCP.server.tools.McpTool;
 import dev.astronauta.dbeaverMCP.server.tools.ToolArgs;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -20,7 +21,6 @@ import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.osgi.framework.FrameworkUtil;
 import tools.jackson.databind.json.JsonMapper;
 
 import org.slf4j.Logger;
@@ -63,7 +63,7 @@ public final class McpHttpServer implements AutoCloseable {
                 .securityValidator(security::validate)
                 .build();
             var specification = McpServer.sync(transport)
-                .serverInfo(McpServerManager.SERVER_NAME, bundleVersion())
+                .serverInfo(McpServerManager.SERVER_NAME, PluginInfo.version())
                 .instructions(instructions)
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .jsonMapper(mapper)
@@ -101,11 +101,6 @@ public final class McpHttpServer implements AutoCloseable {
 
     public int port() {
         return ((ServerConnector) jetty.getConnectors()[0]).getLocalPort();
-    }
-
-    private static String bundleVersion() {
-        var bundle = FrameworkUtil.getBundle(McpHttpServer.class);
-        return bundle == null ? "development" : bundle.getVersion().toString();
     }
 
     @Override
