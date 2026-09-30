@@ -17,7 +17,8 @@ Require-Bundle: org.jkiss.dbeaver.model,
  org.eclipse.jface,
  org.eclipse.ui,
  org.eclipse.ui.workbench
-Import-Package: org.eclipse.swt.graphics,
+Import-Package: org.eclipse.swt.custom,
+ org.eclipse.swt.graphics,
  org.eclipse.swt.widgets,
  org.osgi.framework,
  org.osgi.service.prefs

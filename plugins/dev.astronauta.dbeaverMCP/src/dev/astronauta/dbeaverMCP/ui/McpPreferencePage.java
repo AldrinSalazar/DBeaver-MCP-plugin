@@ -1,14 +1,14 @@
 package dev.astronauta.dbeaverMCP.ui;
 
-
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-
 import dev.astronauta.dbeaverMCP.McpPlugin;
 import dev.astronauta.dbeaverMCP.McpPreferences;
 import dev.astronauta.dbeaverMCP.McpPreferences.AccessMode;
+import dev.astronauta.dbeaverMCP.PluginInfo;
 import dev.astronauta.dbeaverMCP.ServerSettings;
 import dev.astronauta.dbeaverMCP.db.AccessPolicy;
 import dev.astronauta.dbeaverMCP.db.BridgeException;
@@ -22,16 +22,20 @@ import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.layout.GridDataFactory;
 import org.eclipse.jface.layout.GridLayoutFactory;
 import org.eclipse.jface.preference.PreferencePage;
+import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.ITableLabelProvider;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.TableViewer;
+import org.eclipse.jface.viewers.StructuredSelection;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.ScrolledComposite;
 import org.eclipse.swt.dnd.Clipboard;
 import org.eclipse.swt.dnd.TextTransfer;
 import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.graphics.Image;
+import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
@@ -44,6 +48,7 @@ import org.eclipse.swt.widgets.TableColumn;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IWorkbench;
 import org.eclipse.ui.IWorkbenchPreferencePage;
+import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.statushandlers.StatusManager;
 
 /**
@@ -52,6 +57,10 @@ import org.eclipse.ui.statushandlers.StatusManager;
  */
 public class McpPreferencePage extends PreferencePage implements IWorkbenchPreferencePage {
 
+    private ScrolledComposite scroller;
+    private Composite contents;
+    private Image githubIcon;
+    private Image githubLightIcon;
     private Button enabledCheck;
     private Button autoStartCheck;
     private Text portText;
@@ -88,17 +97,31 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
     }
 
     @Override
-    protected Control createContents(Composite parent) {
-        Composite root = new Composite(parent, SWT.NONE);
-        GridLayoutFactory.fillDefaults().margins(8, 8).spacing(8, 8).applyTo(root);
+    public Point computeSize() {
+        // PreferencePage caches the assigned size; keep a stable preferred size when resizing.
+        return new Point(600, 400);
+    }
 
-        createServerGroup(root);
-        createModeGroup(root);
-        createConnectionsGroup(root);
+    @Override
+    protected Control createContents(Composite parent) {
+        scroller = new ScrolledComposite(parent, SWT.V_SCROLL);
+        scroller.setExpandHorizontal(true);
+        scroller.setExpandVertical(true);
+        scroller.setShowFocusedControl(true);
+        contents = new Composite(scroller, SWT.NONE);
+        GridLayoutFactory.fillDefaults().margins(8, 8).spacing(8, 8).applyTo(contents);
+        scroller.setContent(contents);
+        scroller.addListener(SWT.Resize, e -> updatePageLayout());
+
+        createServerGroup(contents);
+        createModeGroup(contents);
+        createConnectionsGroup(contents);
+        createFooter(contents);
 
         loadValues();
         updateStatus();
-        return root;
+        updatePageLayout();
+        return scroller;
     }
 
     private void createServerGroup(Composite root) {
@@ -115,14 +138,17 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         autoStartCheck.setText("Start automatically with DBeaver");
         GridDataFactory.fillDefaults().span(4, 1).applyTo(autoStartCheck);
 
-        Label portLabel = new Label(group, SWT.NONE);
-        portLabel.setText("Port:");
-        portText = new Text(group, SWT.BORDER);
-        GridDataFactory.fillDefaults().hint(80, SWT.DEFAULT).applyTo(portText);
-        Label hostLabel = new Label(group, SWT.NONE);
+        Composite address = new Composite(group, SWT.NONE);
+        GridDataFactory.fillDefaults().span(4, 1).grab(true, false).applyTo(address);
+        GridLayoutFactory.fillDefaults().numColumns(4).spacing(8, 6).applyTo(address);
+        Label hostLabel = new Label(address, SWT.NONE);
         hostLabel.setText("Listen host:");
-        hostText = new Text(group, SWT.BORDER);
+        hostText = new Text(address, SWT.BORDER | SWT.SINGLE);
         GridDataFactory.fillDefaults().grab(true, false).applyTo(hostText);
+        Label portLabel = new Label(address, SWT.NONE);
+        portLabel.setText("Port:");
+        portText = new Text(address, SWT.BORDER | SWT.SINGLE);
+        GridDataFactory.fillDefaults().hint(80, SWT.DEFAULT).applyTo(portText);
 
         hostWarning = new Label(group, SWT.WRAP);
         hostWarning.setText("Warning: listening on a non-loopback address exposes the MCP server beyond this machine.");
@@ -130,12 +156,15 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         GridDataFactory.fillDefaults().span(4, 1).grab(true, false).applyTo(hostWarning);
         hostText.addListener(SWT.Modify, e -> updateHostWarning());
 
-        Label timeoutLabel = new Label(group, SWT.NONE);
-        timeoutLabel.setText("Query timeout (seconds, 0 = off):");
-        timeoutText = new Text(group, SWT.BORDER);
+        Composite timeout = new Composite(group, SWT.NONE);
+        GridDataFactory.fillDefaults().span(4, 1).grab(true, false).applyTo(timeout);
+        GridLayoutFactory.fillDefaults().numColumns(3).spacing(8, 6).applyTo(timeout);
+        Label timeoutLabel = new Label(timeout, SWT.NONE);
+        timeoutLabel.setText("Query timeout:");
+        timeoutText = new Text(timeout, SWT.BORDER | SWT.SINGLE);
         GridDataFactory.fillDefaults().hint(80, SWT.DEFAULT).applyTo(timeoutText);
-        Label timeoutFiller = new Label(group, SWT.NONE);
-        GridDataFactory.fillDefaults().span(2, 1).applyTo(timeoutFiller);
+        Label timeoutHint = new Label(timeout, SWT.NONE);
+        timeoutHint.setText("seconds (0 disables the timeout)");
 
         authCheck = new Button(group, SWT.CHECK);
         authCheck.setText("Require bearer token (recommended)");
@@ -150,7 +179,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         Label tokenLabel = new Label(group, SWT.NONE);
         tokenLabel.setText("Bearer token:");
         tokenText = new Text(group, SWT.BORDER | SWT.SINGLE);
-        GridDataFactory.fillDefaults().grab(true, false).applyTo(tokenText);
+        GridDataFactory.fillDefaults().grab(true, false).hint(180, SWT.DEFAULT).applyTo(tokenText);
         regenerateButton = new Button(group, SWT.PUSH);
         regenerateButton.setText("Regenerate");
         regenerateButton.addListener(SWT.Selection, e -> tokenText.setText(ServerSettings.newToken()));
@@ -178,7 +207,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
             McpServerManager.getInstance().cancelAutoStart();
             runServerAction("Stopping MCP server", () -> McpServerManager.getInstance().stop());
         });
-        statusLabel = new Label(buttons, SWT.NONE);
+        statusLabel = new Label(buttons, SWT.WRAP);
         GridDataFactory.fillDefaults().grab(true, false).applyTo(statusLabel);
     }
 
@@ -214,20 +243,20 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         GridLayoutFactory.fillDefaults().numColumns(2).margins(8, 8).spacing(8, 6).applyTo(group);
 
         Label info = new Label(group, SWT.WRAP);
-        info.setText("Select a connection to grant MCP access. Connections without any grant are invisible"
-            + " to MCP clients. The plugin reuses the connections stored in DBeaver, it never asks for credentials.");
+        info.setText("Select a connection to grant access. Connections without grants are hidden from MCP clients.");
         GridDataFactory.fillDefaults().span(2, 1).grab(true, false).applyTo(info);
 
-        Table table = new Table(group, SWT.BORDER | SWT.FULL_SELECTION | SWT.SINGLE | SWT.V_SCROLL);
+        Table table = new Table(group, SWT.BORDER | SWT.FULL_SELECTION | SWT.SINGLE | SWT.V_SCROLL | SWT.H_SCROLL);
         table.setHeaderVisible(true);
         table.setLinesVisible(true);
         GridDataFactory.fillDefaults().grab(true, true).hint(SWT.DEFAULT, 150).applyTo(table);
         String[] titles = {"Connection", "Project", "Driver", "Read-only protection", "Granted access"};
-        int[] widths = {180, 120, 140, 140, 170};
+        int[] widths = {180, 120, 140, 180, 170};
         for (int i = 0; i < titles.length; i++) {
             TableColumn column = new TableColumn(table, SWT.NONE);
             column.setText(titles[i]);
-            column.setWidth(widths[i]);
+            column.pack();
+            column.setWidth(Math.max(widths[i], column.getWidth()));
         }
         connectionsViewer = new TableViewer(table);
         connectionsViewer.setContentProvider(ArrayContentProvider.getInstance());
@@ -277,6 +306,65 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         writeCheck.addListener(SWT.Selection, e -> editGrants(() -> grants.setWrite(selected.id(), writeCheck.getSelection())));
     }
 
+    private void createFooter(Composite parent) {
+        Composite footer = new Composite(parent, SWT.NONE);
+        GridDataFactory.fillDefaults().grab(true, false).applyTo(footer);
+        GridLayoutFactory.fillDefaults().numColumns(2).spacing(8, 0).applyTo(footer);
+
+        Button github = new Button(footer, SWT.PUSH);
+        github.setText("GitHub");
+        github.setToolTipText("Open the source repository: " + PluginInfo.REPOSITORY_URL);
+        githubIcon = ImageDescriptor.createFromURL(McpPreferencePage.class.getResource("/icons/github.png")).createImage();
+        githubLightIcon = ImageDescriptor.createFromURL(McpPreferencePage.class.getResource("/icons/github-light.png")).createImage();
+        updateGithubIcon(github);
+        // Eclipse can apply or change its theme after the widgets are created.
+        github.addListener(SWT.Skin, e -> scheduleGithubIconUpdate(github));
+        scheduleGithubIconUpdate(github);
+        github.addListener(SWT.Selection, e -> openRepository());
+
+        Label version = new Label(footer, SWT.NONE);
+        version.setText("Version " + PluginInfo.version());
+        GridDataFactory.fillDefaults().grab(true, false).align(SWT.END, SWT.CENTER).applyTo(version);
+    }
+
+    private void updateGithubIcon(Button github) {
+        var foreground = github.getForeground().getRGB();
+        boolean lightIcon = foreground.red + foreground.green + foreground.blue > 3 * 128;
+        Image icon = lightIcon ? githubLightIcon : githubIcon;
+        if (github.getImage() != icon) {
+            github.setImage(icon);
+        }
+    }
+
+    private void scheduleGithubIconUpdate(Button github) {
+        github.getDisplay().asyncExec(() -> {
+            if (!github.isDisposed()) {
+                updateGithubIcon(github);
+            }
+        });
+    }
+
+    private void openRepository() {
+        try {
+            PlatformUI.getWorkbench().getBrowserSupport().getExternalBrowser()
+                .openURL(URI.create(PluginInfo.REPOSITORY_URL).toURL());
+        } catch (Exception e) {
+            McpPlugin.logError("Cannot open the source repository", e);
+            setErrorMessage("Cannot open GitHub. Repository: " + PluginInfo.REPOSITORY_URL);
+        }
+    }
+
+    @Override
+    public void dispose() {
+        if (githubIcon != null && !githubIcon.isDisposed()) {
+            githubIcon.dispose();
+        }
+        if (githubLightIcon != null && !githubLightIcon.isDisposed()) {
+            githubLightIcon.dispose();
+        }
+        super.dispose();
+    }
+
     private AccessMode selectedMode() {
         if (writeModeRadio.getSelection()) {
             return AccessMode.READ_WRITE;
@@ -308,13 +396,17 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         if (label.getLayoutData() instanceof GridData gridData) {
             gridData.exclude = !visible;
         }
-        Control page = getControl();
-        if (page instanceof Composite root && !root.isDisposed()) {
-            root.layout(true, true);
-            if (root.getParent() != null && !root.getParent().isDisposed()) {
-                root.getParent().layout(true, true);
-            }
+        updatePageLayout();
+    }
+
+    private void updatePageLayout() {
+        if (contents == null || contents.isDisposed()) {
+            return;
         }
+        int width = scroller.getClientArea().width;
+        int height = contents.computeSize(width > 0 ? width : 600, SWT.DEFAULT).y;
+        scroller.setMinSize(0, height);
+        contents.layout(true, true);
     }
 
     private void updateAuthState() {
@@ -351,7 +443,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
 
     private void updateGrantChecks() {
         if (selected == null) {
-            grantsGroup.setText("Access");
+            grantsGroup.setText("Select a connection to edit access");
             metadataCheck.setSelection(false);
             readCheck.setSelection(false);
             writeCheck.setSelection(false);
@@ -429,6 +521,8 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
                 }
             }
         }
+        connectionsViewer.setSelection(selected == null
+            ? StructuredSelection.EMPTY : new StructuredSelection(selected), true);
         updateGrantChecks();
     }
 
