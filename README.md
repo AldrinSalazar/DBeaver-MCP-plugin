@@ -149,9 +149,9 @@ Read-only safety is treated as a security boundary and enforced in layers. It ne
 - Requires a **Bearer token** by default (auto-generated, copyable from preferences). Token authentication can be disabled for local setups. This is not recommended, especially on a non-loopback host.
 - Rejects non-local `Origin` headers (DNS-rebinding protection).
 - **Three access modes**: Metadata only (no SQL tools at all), Read only, Read/write. `execute_sql` is only advertised in read/write mode.
-- **Per-connection grants**: each connection separately enables Metadata access, Read-only queries, and Write queries. Connections without any grant are invisible to MCP clients.
+- **Per-connection grants**: each connection separately enables Metadata access, Read-only queries, and Write queries. SQL grants include metadata access; removing metadata also removes SQL grants. Connections without any grant are invisible to MCP clients. **Enable all** grants only the permissions available in the selected mode and skips writes for DBeaver read-only connections.
 - Reads (`query_sql`) are protected in layers: isolated session, driver read-only flag, explicit transaction, database-native read-only transaction where supported, SQL validation (single statement; rejects `SELECT ... INTO`, data-modifying CTEs, `EXPLAIN ANALYZE` of writes), query timeout, row cap, and rollback. Any protection failure aborts the query instead of downgrading silently.
-- Writes run on isolated sessions too, so an MCP write commits only its own statement and never touches your open transactions.
+- Writes run on isolated sessions too, so an MCP write commits only its own statement and never touches your open transactions. Statements returning rows also finalize their transaction. Commit failures return an MCP error with an unknown transaction outcome; do not automatically retry a write after such an error.
 - Connections marked read-only in DBeaver never expose writes, regardless of plugin settings.
 - Passwords are never read or returned, and connection URLs are not exposed.
 
@@ -165,6 +165,10 @@ Read-only protection strength depends on the database (shown per connection in p
 | SQLite | Driver enforced (`PRAGMA query_only`, verified) |
 | Anything else (SQL Server, ...) | Best effort (validation + hint + rollback, clearly marked) |
 
+`query_sql` refuses to execute without a usable JDBC connection and a successfully established protection strategy. Query timeout failures also abort before execution when the timeout is enabled. Result column and row data have a 2 MiB serialized size budget, in addition to the row cap; truncated responses include a reason. All tool results have a 3 MiB serialized JSON limit; larger results return an error asking for a narrower request. SQLXML and SQL arrays are read through bounded streams, and nested arrays are omitted. Metadata responses include warnings when constraints, indexes, or procedure parameters cannot be read.
+
+SQL validation uses the database product to recognize supported PostgreSQL, MySQL/MariaDB, SQL Server, and SQLite quoting. It rejects executable comments and mode-dependent backslash literals; use doubled quotes or PostgreSQL E-string syntax. It remains a supplemental check, not a complete SQL parser.
+
 A strict "MCP cannot modify the database" guarantee additionally requires database-level authorization (a dedicated read-only user or a read replica). SQL inspection alone is never presented as such a guarantee.
 
 ## Requirements
@@ -176,7 +180,7 @@ A strict "MCP cannot modify the database" guarantee additionally requires databa
 
 ```powershell
 # Windows PowerShell, from this directory:
-.\scripts\install-dbeaver-libs.ps1   # one-time, registers 2 DBeaver jars for unit tests
+.\scripts\install-dbeaver-libs.ps1   # one-time, registers the DBeaver and OSGi jars for tests
 mvn clean verify
 ```
 
@@ -209,7 +213,7 @@ The build is a Tycho multi-module reactor (`plugins/`, `features/`, `repository/
 
 - Tycho 5.0.4 multi-module build: `plugins/` (OSGi bundle), `features/` (installable feature), `repository/` (p2 site + release ZIP), `tests/` (plain unit tests).
 - Java 21 throughout; Eclipse/DBeaver APIs come from the p2 target platform, third-party libs from Maven Central (embedded under the bundle's `lib/`).
-- `mvn test` runs unit tests plus a live Streamable-HTTP round-trip test (boots the real Jetty + MCP stack on an ephemeral port). The tests module needs the two DBeaver jars from `scripts/install-dbeaver-libs.*`.
+- `mvn test` runs behavioral tests plus live Streamable-HTTP tests using the production Jetty + MCP wiring on an ephemeral port. The suite covers transaction finalization and failures, read-only cleanup, permissions, bounded results, and HTTP authentication. The tests module needs the four platform jars from `scripts/install-dbeaver-libs.*`.
 - When upgrading a third-party dependency version, sync the explicit artifact list in the plugin `pom.xml` **and** `Bundle-ClassPath` in `META-INF/MANIFEST.MF` with the new file names.
 - Releases: run `python3 scripts/set-version.py X.Y.Z`, commit the result, then tag that commit exactly `vX.Y.Z`. Only the tag publishes `dbeaver-mcp-X.Y.Z.zip`.
-- Key classes: `db.DBeaverBridge` (all DBeaver access), `db.SqlGuard` (read/write classification), `db.ValueRenderer` (DB values to JSON-safe data), `db.readonly.*` (database-specific read-only enforcement), `server.McpServerManager` (Jetty + MCP wiring), `server.tools.*` (one class per MCP tool, `Schema` builder for input schemas, `ToolArgs` for arguments), `ui.McpPreferencePage` (config UI).
+- Key classes: `db.DBeaverBridge` (small tool facade), `db.ConnectionCatalog` (connection discovery and resolution), `db.AccessPolicy` (immutable permission snapshot), `db.MetadataService` / `MetadataMapper` (metadata lookup and responses), `db.SqlExecutor` / `IsolatedSession` (execution and transaction lifecycle), `db.ResultReader` / `ValueRenderer` (bounded results), `db.SqlGuard` / `SqlLexer` (supplemental SQL validation), `db.readonly.*` (database-specific protection), `server.McpServerManager` (lifecycle), `server.McpHttpServer` (production HTTP wiring), `server.tools.*` (one class per MCP tool), `ui.ConnectionGrants` / `McpPreferencePage` (permission editing and SWT controls).

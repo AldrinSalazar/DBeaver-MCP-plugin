@@ -3,7 +3,6 @@ package dev.astronauta.dbeaverMCP.server.tools;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import dev.astronauta.dbeaverMCP.McpPreferences;
 import dev.astronauta.dbeaverMCP.db.DBeaverBridge;
 
 public final class ListConnectionsTool implements McpTool {
@@ -25,12 +24,8 @@ public final class ListConnectionsTool implements McpTool {
 
     @Override
     public Object call(ToolArgs args) throws Exception {
-        McpPreferences prefs = new McpPreferences();
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("connections", DBeaverBridge.listAllConnections().stream()
-            .filter(c -> prefs.canExpose(c.id()))
-            .map(DBeaverBridge::toMap)
-            .toList());
+        result.put("connections", DBeaverBridge.listConnections());
         return result;
     }
 }

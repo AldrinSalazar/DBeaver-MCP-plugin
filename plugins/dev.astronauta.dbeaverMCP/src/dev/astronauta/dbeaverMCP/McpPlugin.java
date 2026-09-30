@@ -25,13 +25,14 @@ public class McpPlugin extends AbstractUIPlugin {
     public void start(BundleContext context) throws Exception {
         super.start(context);
         instance = this;
+        McpServerManager.getInstance().activate();
         LOG.info("MCP Server plugin started");
     }
 
     @Override
     public void stop(BundleContext context) throws Exception {
         try {
-            McpServerManager.getInstance().stop();
+            McpServerManager.getInstance().shutdown();
         } catch (Exception e) {
             LOG.warn("Error stopping MCP server", e);
         }

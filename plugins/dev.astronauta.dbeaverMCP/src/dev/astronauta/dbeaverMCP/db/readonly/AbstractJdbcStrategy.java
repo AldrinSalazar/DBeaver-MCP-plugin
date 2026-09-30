@@ -2,26 +2,26 @@ package dev.astronauta.dbeaverMCP.db.readonly;
 
 import java.sql.Connection;
 import java.sql.Statement;
-
-import dev.astronauta.dbeaverMCP.McpPlugin;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Shared lifecycle: driver read-only hint, explicit transaction, native
  * read-only statement, and fail-safe cleanup (rollback + flag restore).
  */
 public abstract class AbstractJdbcStrategy implements ReadOnlyStrategy {
-
-    private interface SqlStep {
-        void run() throws Exception;
-    }
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractJdbcStrategy.class);
 
     @Override
     public final void begin(Connection connection) throws Exception {
         try {
             connection.setReadOnly(true);
         } catch (Exception e) {
-            // Hint only, never the boundary: log and continue.
-            McpPlugin.logInfo("MCP: driver read-only hint not applied: " + e.getMessage());
+            if (protection() == ProtectionLevel.BEST_EFFORT) {
+                throw e;
+            }
+            // A native strategy remains authoritative when a driver hint is unsupported.
+            LOG.info("MCP: driver read-only hint not applied", e);
         }
         connection.setAutoCommit(false);
         beginNative(connection);
@@ -34,14 +34,21 @@ public abstract class AbstractJdbcStrategy implements ReadOnlyStrategy {
     protected abstract void beginNative(Connection connection) throws Exception;
 
     @Override
-    public final void end(Connection connection) {
+    public final void end(Connection connection) throws Exception {
         if (connection == null) {
             return;
         }
-        attempt(connection::rollback, "rollback");
-        attempt(() -> endNative(connection), "native cleanup");
-        attempt(() -> connection.setAutoCommit(true), "restore auto-commit");
-        attempt(() -> connection.setReadOnly(false), "restore read/write flag");
+        // Enabling auto-commit after a failed rollback could commit the read transaction.
+        // The caller owns the isolated connection and closes it instead.
+        connection.rollback();
+        endNative(connection);
+        connection.setAutoCommit(true);
+        try {
+            connection.setReadOnly(false);
+        } catch (Exception e) {
+            // This remains a hint; rollback and native cleanup above are mandatory.
+            LOG.info("MCP: driver read-only hint could not be restored", e);
+        }
     }
 
     protected void endNative(Connection connection) throws Exception {
@@ -50,14 +57,6 @@ public abstract class AbstractJdbcStrategy implements ReadOnlyStrategy {
     protected static void execute(Connection connection, String sql) throws Exception {
         try (Statement statement = connection.createStatement()) {
             statement.execute(sql);
-        }
-    }
-
-    private void attempt(SqlStep step, String what) {
-        try {
-            step.run();
-        } catch (Exception e) {
-            McpPlugin.logInfo("MCP: read-only cleanup (" + what + ") failed: " + e.getMessage());
         }
     }
 }

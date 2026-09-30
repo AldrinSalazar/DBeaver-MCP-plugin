@@ -1,116 +1,113 @@
 package dev.astronauta.dbeaverMCP;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
-import io.modelcontextprotocol.json.McpJsonMapper;
-import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
-import io.modelcontextprotocol.json.schema.JsonSchemaValidator;
-import io.modelcontextprotocol.json.schema.jackson3.JacksonJsonSchemaValidatorSupplier;
-import io.modelcontextprotocol.server.McpServer;
-import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
-import io.modelcontextprotocol.spec.McpSchema;
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
+import dev.astronauta.dbeaverMCP.db.BridgeException;
+import dev.astronauta.dbeaverMCP.server.McpHttpServer;
+import dev.astronauta.dbeaverMCP.server.tools.McpTool;
+import dev.astronauta.dbeaverMCP.server.tools.Schema;
+import dev.astronauta.dbeaverMCP.server.tools.ToolArgs;
 import org.junit.Test;
-import tools.jackson.databind.json.JsonMapper;
 
-/**
- * Boots the same MCP + Jetty wiring McpServerManager uses (minus DBeaver)
- * and speaks Streamable HTTP to it. Catches SDK misuse and missing
- * embedded dependencies.
- */
+/** Exercises the production transport, authentication, schema validation and error dispatch. */
 public class McpHttpTest {
-
+    private static final String INITIALIZE = """
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "protocolVersion":"2025-06-18","capabilities":{},
+        "clientInfo":{"name":"test","version":"1.0"}}}
+        """;
     private String sessionId;
 
+    private static McpTool tool(String toolName) {
+        return new McpTool() {
+            public String name() { return toolName; }
+            public String description() { return "Test tool"; }
+            public Map<String, Object> inputSchema() {
+                return Schema.object().property("text", Schema.string(null)).required("text").build();
+            }
+            public Object call(ToolArgs args) throws Exception {
+                if (toolName.equals("failure")) {
+                    throw new BridgeException("Commit failed; transaction outcome is unknown");
+                }
+                if (toolName.equals("oversized")) {
+                    return "x".repeat(McpHttpServer.MAX_TOOL_RESULT_BYTES + 1);
+                }
+                return Map.of("echo", args.required("text"));
+            }
+        };
+    }
+
     @Test
-    public void fullRoundTrip() throws Exception {
-        McpJsonMapper mapper = new JacksonMcpJsonMapper(JsonMapper.builder().build());
-        JsonSchemaValidator validator = new JacksonJsonSchemaValidatorSupplier().get();
-
-        HttpServletStreamableServerTransportProvider transport =
-            HttpServletStreamableServerTransportProvider.builder()
-                .jsonMapper(mapper)
-                .mcpEndpoint("/mcp")
-                .build();
-
-        McpSchema.Tool echo = McpSchema.Tool.builder("echo", mapper,
-                "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}")
-            .description("Echoes input")
-            .build();
-
-        McpSyncServer server = McpServer.sync(transport)
-            .serverInfo("test-server", "1.0.0")
-            .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-            .jsonMapper(mapper)
-            .jsonSchemaValidator(validator)
-            .toolCall(echo, (exchange, req) -> McpSchema.CallToolResult.builder()
-                .addTextContent("echo:" + req.arguments().get("text"))
-                .isError(false)
-                .build())
-            .build();
-
-        Server jetty = new Server();
-        ServerConnector connector = new ServerConnector(jetty);
-        connector.setHost("127.0.0.1");
-        connector.setPort(0);
-        jetty.addConnector(connector);
-        ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
-        context.setContextPath("/");
-        context.addServlet(new ServletHolder("mcp", transport), "/mcp");
-        jetty.setHandler(context);
-        jetty.start();
-        int port = ((ServerConnector) jetty.getConnectors()[0]).getLocalPort();
-
-        try {
-            HttpClient http = HttpClient.newHttpClient();
-            String init = post(http, port,
-                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{"
-                    + "\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
-                    + "\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}");
-            assertTrue(init, init.contains("test-server"));
+    public void authenticatedRoundTripAndToolErrorsUseProductionWiring() throws Exception {
+        try (McpHttpServer server = McpHttpServer.start(
+                new McpHttpServer.Configuration("127.0.0.1", 0, true, "test-token"),
+                List.of(tool("echo"), tool("failure"), tool("oversized")), "Test server")) {
+            HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+            int port = server.port();
+            assertEquals(401, send(http, port, INITIALIZE, null, null).statusCode());
+            assertEquals(401, send(http, port, INITIALIZE, "Bearer wrong-token", null).statusCode());
+            assertEquals(403, send(http, port, INITIALIZE, "Bearer test-token", "https://evil.example").statusCode());
+            String init = post(http, port, INITIALIZE);
+            assertTrue(init, init.contains("dbeaver-mcp"));
             assertNotNull(sessionId);
-
             post(http, port, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
-
-            String tools = post(http, port,
-                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
+            String tools = post(http, port, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}");
             assertTrue(tools, tools.contains("\"echo\""));
-
-            String call = post(http, port,
-                "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{"
-                    + "\"name\":\"echo\",\"arguments\":{\"text\":\"hello\"}}}");
-            assertTrue(call, call.contains("echo:hello"));
-        } finally {
-            server.close();
-            jetty.stop();
+            String echo = post(http, port, call(3, "echo"));
+            assertTrue(echo, echo.contains("hello"));
+            assertTrue(echo, echo.contains("\"isError\":false"));
+            String failure = post(http, port, call(4, "failure"));
+            assertTrue(failure, failure.contains("\"isError\":true"));
+            assertTrue(failure, failure.contains("transaction outcome is unknown"));
+            String oversized = post(http, port, call(5, "oversized"));
+            assertTrue(oversized, oversized.contains("\"isError\":true"));
+            assertTrue(oversized, oversized.contains("size limit"));
         }
     }
 
+    @Test
+    public void disablingAuthenticationStillValidatesOrigins() throws Exception {
+        try (McpHttpServer server = McpHttpServer.start(
+                new McpHttpServer.Configuration("127.0.0.1", 0, false, ""), List.of(), "Test server")) {
+            HttpClient http = HttpClient.newHttpClient();
+            assertEquals(403, send(http, server.port(), INITIALIZE, null, "https://evil.example").statusCode());
+            assertEquals(200, send(http, server.port(), INITIALIZE, null, "http://localhost:3000").statusCode());
+        }
+    }
+
+    private static String call(int id, String tool) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id
+            + ",\"method\":\"tools/call\",\"params\":{\"name\":\"" + tool
+            + "\",\"arguments\":{\"text\":\"hello\"}}}";
+    }
+
     private String post(HttpClient http, int port, String body) throws Exception {
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-            .uri(URI.create("http://127.0.0.1:" + port + "/mcp"))
+        HttpResponse<String> response = send(http, port, body, "Bearer test-token", null);
+        response.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionId = id);
+        assertTrue("HTTP " + response.statusCode() + ": " + response.body(),
+            response.statusCode() == 200 || response.statusCode() == 202);
+        return response.body() == null ? "" : response.body();
+    }
+
+    private HttpResponse<String> send(HttpClient http, int port, String body, String authorization, String origin)
+        throws Exception {
+        var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/mcp"))
+            .timeout(Duration.ofSeconds(5))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .header("MCP-Protocol-Version", "2025-06-18")
             .POST(HttpRequest.BodyPublishers.ofString(body));
-        if (sessionId != null) {
-            builder.header("Mcp-Session-Id", sessionId);
-        }
-        HttpResponse<String> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        response.headers().firstValue("Mcp-Session-Id").ifPresent(id -> sessionId = id);
-        response.headers().firstValue("mcp-session-id").ifPresent(id -> sessionId = id);
-        assertTrue("HTTP " + response.statusCode() + ": " + response.body(),
-            response.statusCode() == 200 || response.statusCode() == 202);
-        return response.body() == null ? "" : response.body();
+        if (authorization != null) { builder.header("Authorization", authorization); }
+        if (origin != null) { builder.header("Origin", origin); }
+        if (sessionId != null) { builder.header("Mcp-Session-Id", sessionId); }
+        return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 }
