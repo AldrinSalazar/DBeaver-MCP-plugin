@@ -35,7 +35,7 @@ All SQL executed through MCP runs as a normal DBeaver query on an isolated sessi
 6. Open **Window > Preferences > MCP Server**:
    - Pick an access mode: Metadata only, Read only (default), or Read/write.
    - Select each connection and grant Metadata access, Read-only queries, and/or Write queries.
-   - Copy the bearer token for your MCP client.
+   - Click **Copy URL** beside the host and port to copy the full MCP endpoint, then copy the bearer token for your MCP client.
    - The server starts automatically; *Start now* / *Stop* override it.
 
 To uninstall: **Help > About DBeaver > Installation Details > Installed Software**, select **DBeaver MCP Server**, **Uninstall**, restart. To upgrade, install the newer ZIP the same way.

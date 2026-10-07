@@ -26,4 +26,23 @@ public class ServerSettingsTest {
         ServerSettings generated = ServerSettings.parse(true, true, "localhost", "4319", true, "", "60");
         assertEquals(64, generated.token().length());
     }
+
+    @Test
+    public void buildsClientAddressesFromEditedHostAndPort() {
+        assertEquals("http://127.0.0.1:4319", ServerSettings.baseUrl("", "4319"));
+        assertEquals("http://localhost:8080", ServerSettings.baseUrl(" localhost ", " 8080 "));
+        assertEquals("http://db.internal.example:65535", ServerSettings.baseUrl("db.internal.example", "65535"));
+        assertEquals("http://[::1]:4319", ServerSettings.baseUrl("::1", "4319"));
+        assertEquals("http://[::1]:4319", ServerSettings.baseUrl("[::1]", "4319"));
+        assertEquals("http://[2001:db8::1]:1", ServerSettings.baseUrl("2001:db8::1", "1"));
+    }
+
+    @Test
+    public void rejectsInvalidClipboardAddresses() {
+        assertThrows(IllegalArgumentException.class, () -> ServerSettings.baseUrl("http://localhost/path", "4319"));
+        assertThrows(IllegalArgumentException.class, () -> ServerSettings.baseUrl("bad host", "4319"));
+        for (String port : new String[] {"", "bad", "0", "-1", "65536"}) {
+            assertThrows(IllegalArgumentException.class, () -> ServerSettings.baseUrl("localhost", port));
+        }
+    }
 }

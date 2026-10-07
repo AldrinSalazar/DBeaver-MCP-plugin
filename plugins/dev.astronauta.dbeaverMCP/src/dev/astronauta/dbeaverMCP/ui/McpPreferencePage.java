@@ -140,7 +140,7 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
 
         Composite address = new Composite(group, SWT.NONE);
         GridDataFactory.fillDefaults().span(4, 1).grab(true, false).applyTo(address);
-        GridLayoutFactory.fillDefaults().numColumns(4).spacing(8, 6).applyTo(address);
+        GridLayoutFactory.fillDefaults().numColumns(5).spacing(8, 6).applyTo(address);
         Label hostLabel = new Label(address, SWT.NONE);
         hostLabel.setText("Listen host:");
         hostText = new Text(address, SWT.BORDER | SWT.SINGLE);
@@ -149,6 +149,10 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
         portLabel.setText("Port:");
         portText = new Text(address, SWT.BORDER | SWT.SINGLE);
         GridDataFactory.fillDefaults().hint(80, SWT.DEFAULT).applyTo(portText);
+        Button copyUrlButton = new Button(address, SWT.PUSH);
+        copyUrlButton.setText("Copy URL");
+        copyUrlButton.setToolTipText("Copy the full MCP URL using the current host and port");
+        copyUrlButton.addListener(SWT.Selection, e -> copyUrlToClipboard());
 
         hostWarning = new Label(group, SWT.WRAP);
         hostWarning.setText("Warning: listening on a non-loopback address exposes the MCP server beyond this machine.");
@@ -431,10 +435,26 @@ public class McpPreferencePage extends PreferencePage implements IWorkbenchPrefe
     }
 
     private void copyTokenToClipboard() {
+        copyToClipboard(tokenText.getText());
+    }
+
+    private void copyUrlToClipboard() {
+        String url;
+        try {
+            url = ServerSettings.baseUrl(hostText.getText(), portText.getText()) + McpServerManager.MCP_PATH;
+        } catch (IllegalArgumentException e) {
+            setErrorMessage(e.getMessage());
+            return;
+        }
+        copyToClipboard(url);
+        setErrorMessage(null);
+    }
+
+    private void copyToClipboard(String text) {
         Clipboard clipboard = new Clipboard(getShell().getDisplay());
         try {
             clipboard.setContents(
-                new Object[] { tokenText.getText() },
+                new Object[] { text },
                 new Transfer[] { TextTransfer.getInstance() });
         } finally {
             clipboard.dispose();
