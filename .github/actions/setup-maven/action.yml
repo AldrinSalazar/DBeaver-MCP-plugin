@@ -1,0 +1,20 @@
+name: Set up Maven
+description: Install the verified Maven version used by the Tycho build.
+runs:
+  using: composite
+  steps:
+    - name: Install Maven 3.9.16
+      shell: bash
+      env:
+        MAVEN_VERSION: "3.9.16"
+        MAVEN_SHA512: "831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6"
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+        maven_dir="$RUNNER_TEMP/apache-maven-$MAVEN_VERSION"
+        curl -fsSL --retry 3 -o "$archive" \
+          "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$MAVEN_VERSION/apache-maven-$MAVEN_VERSION-bin.tar.gz"
+        printf '%s  %s\n' "$MAVEN_SHA512" "$archive" | sha512sum --check --status
+        tar -xzf "$archive" -C "$RUNNER_TEMP"
+        printf '%s\n' "$maven_dir/bin" >> "$GITHUB_PATH"
+        "$maven_dir/bin/mvn" --version

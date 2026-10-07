@@ -23,8 +23,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Check Maven
-        run: mvn --version
+      - name: Set up Maven
+        uses: ./.github/actions/setup-maven
 
       - name: Download DBeaver CE (test jars only)
         run: |

@@ -30,6 +30,9 @@ jobs:
           java-version: "21"
           cache: maven
 
+      - name: Set up Maven
+        uses: ./.github/actions/setup-maven
+
       - name: Download DBeaver CE (test jars only)
         run: |
           curl -fsSL --retry 3 -o /tmp/dbeaver-ce.tar.gz https://dbeaver.io/files/dbeaver-ce-latest-linux.gtk.x86_64.tar.gz
@@ -72,6 +75,9 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+
+      - name: Set up Maven
+        uses: ./.github/actions/setup-maven
 
       - name: Download unsigned p2 repository
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
