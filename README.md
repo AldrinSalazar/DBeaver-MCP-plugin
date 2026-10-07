@@ -6,7 +6,7 @@ The plugin **reuses the connections stored in DBeaver**. It never manages creden
 
 ## Screenshot
 
-Preferences page where you enable the server, set the access mode, and grant per-connection access. The footer shows the installed plugin version and links to this repository on GitHub.
+Preferences page where you enable the server, copy the full MCP URL, set the access mode, and grant per-connection access. The footer shows the installed plugin version and links to this repository on GitHub.
 
 ![MCP Server preferences](screenshots/DBMCP1.png)
 
