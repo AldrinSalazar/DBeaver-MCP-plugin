@@ -12,6 +12,7 @@ import java.util.Map;
 
 import dev.astronauta.dbeaverMCP.db.BridgeException;
 import dev.astronauta.dbeaverMCP.server.McpHttpServer;
+import dev.astronauta.dbeaverMCP.server.tools.FailedResult;
 import dev.astronauta.dbeaverMCP.server.tools.McpTool;
 import dev.astronauta.dbeaverMCP.server.tools.Schema;
 import dev.astronauta.dbeaverMCP.server.tools.ToolArgs;
@@ -37,6 +38,9 @@ public class McpHttpTest {
                 if (toolName.equals("failure")) {
                     throw new BridgeException("Commit failed; transaction outcome is unknown");
                 }
+                if (toolName.equals("scriptFailure")) {
+                    return new FailedResult(Map.of("status", "failed", "executedCount", 2));
+                }
                 if (toolName.equals("oversized")) {
                     return "x".repeat(McpHttpServer.MAX_TOOL_RESULT_BYTES + 1);
                 }
@@ -49,7 +53,7 @@ public class McpHttpTest {
     public void authenticatedRoundTripAndToolErrorsUseProductionWiring() throws Exception {
         try (McpHttpServer server = McpHttpServer.start(
                 new McpHttpServer.Configuration("127.0.0.1", 0, true, "test-token"),
-                List.of(tool("echo"), tool("failure"), tool("oversized")), "Test server")) {
+                List.of(tool("echo"), tool("failure"), tool("oversized"), tool("scriptFailure")), "Test server")) {
             HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             int port = server.port();
             assertEquals(401, send(http, port, INITIALIZE, null, null).statusCode());
@@ -70,6 +74,9 @@ public class McpHttpTest {
             String oversized = post(http, port, call(5, "oversized"));
             assertTrue(oversized, oversized.contains("\"isError\":true"));
             assertTrue(oversized, oversized.contains("size limit"));
+            String scriptFailure = post(http, port, call(6, "scriptFailure"));
+            assertTrue(scriptFailure, scriptFailure.contains("\"isError\":true"));
+            assertTrue(scriptFailure, scriptFailure.contains("executedCount"));
         }
     }
 

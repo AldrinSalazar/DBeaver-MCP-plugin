@@ -76,4 +76,21 @@ public final class DBeaverBridge {
         result.put("connection", connection.getName());
         return result;
     }
+
+    /** @param timeoutSeconds whole-script limit, or null for the preference's query timeout. */
+    public static Map<String, Object> executeScript(String ref, String sql, Integer timeoutSeconds,
+            String expectDatabase, String expectHost) throws BridgeException {
+        McpPreferences preferences = new McpPreferences();
+        AccessPolicy policy = preferences.accessPolicy();
+        DBPDataSourceContainer connection = new ConnectionCatalog().resolveConnection(ref, policy);
+        policy.requireWrite(connection.getId(), connection.isConnectionReadOnly());
+        if (expectHost != null) {
+            ScriptExecutor.requireHost(connection.getConnectionConfiguration().getHostName(), expectHost);
+        }
+        DBPDataSource dataSource = ConnectionCatalog.ensureDataSource(connection, new VoidProgressMonitor());
+        int timeout = timeoutSeconds != null ? timeoutSeconds : preferences.getQueryTimeoutSec();
+        Map<String, Object> result = new ScriptExecutor(dataSource, timeout).run(sql, expectDatabase);
+        result.put("connection", connection.getName());
+        return result;
+    }
 }

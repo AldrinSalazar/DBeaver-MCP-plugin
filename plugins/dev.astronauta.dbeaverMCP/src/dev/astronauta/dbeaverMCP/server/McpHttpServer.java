@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 
 import dev.astronauta.dbeaverMCP.db.BridgeException;
 import dev.astronauta.dbeaverMCP.PluginInfo;
+import dev.astronauta.dbeaverMCP.server.tools.FailedResult;
 import dev.astronauta.dbeaverMCP.server.tools.McpTool;
 import dev.astronauta.dbeaverMCP.server.tools.ToolArgs;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -126,13 +127,15 @@ public final class McpHttpServer implements AutoCloseable {
 
     private static McpSchema.CallToolResult handle(ToolCall call) {
         try {
-            String json = Json.stringify(call.call());
+            Object value = call.call();
+            boolean failed = value instanceof FailedResult;
+            String json = Json.stringify(failed ? ((FailedResult) value).body() : value);
             if (json.getBytes(StandardCharsets.UTF_8).length > MAX_TOOL_RESULT_BYTES) {
                 return error("Tool response exceeds the 3 MiB size limit. Narrow the request.");
             }
             return McpSchema.CallToolResult.builder()
                 .addTextContent(json)
-                .isError(false)
+                .isError(failed)
                 .build();
         } catch (BridgeException e) {
             return error(e.getMessage());

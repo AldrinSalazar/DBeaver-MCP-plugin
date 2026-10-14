@@ -29,12 +29,17 @@ public final class Schema {
     }
 
     public static Map<String, Object> integer(String description, int minimum, int maximum, int defaultValue) {
+        Map<String, Object> schema = integer(description, minimum, maximum);
+        schema.put("default", defaultValue);
+        return schema;
+    }
+
+    public static Map<String, Object> integer(String description, int minimum, int maximum) {
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "integer");
         putIfPresent(schema, "description", description);
         schema.put("minimum", minimum);
         schema.put("maximum", maximum);
-        schema.put("default", defaultValue);
         return schema;
     }
 

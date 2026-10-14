@@ -104,7 +104,7 @@ public final class SqlExecutor {
         return info;
     }
 
-    private static BridgeException executionError(String prefix, Exception error) {
+    static BridgeException executionError(String prefix, Exception error) {
         if (error instanceof BridgeException bridge) {
             return bridge;
         }

@@ -72,9 +72,12 @@ final class IsolatedSession implements AutoCloseable {
     }
 
     Connection requireJdbc() throws Exception {
+        return requireJdbc("Cannot establish read-only protection");
+    }
+
+    Connection requireJdbc(String reason) throws Exception {
         if (jdbc == null || jdbc.isClosed()) {
-            throw new BridgeException("Cannot establish read-only protection: no usable JDBC connection."
-                + " SQL was not executed.");
+            throw new BridgeException(reason + ": no usable JDBC connection. SQL was not executed.");
         }
         return jdbc;
     }
@@ -87,6 +90,17 @@ final class IsolatedSession implements AutoCloseable {
         if (jdbc == null && transactions == null) {
             throw new BridgeException("Cannot determine the isolated session's transaction handling."
                 + " SQL was not executed.");
+        }
+    }
+
+    /** Lets scripts manage their own transactions; the session is discarded afterwards. */
+    void enableAutoCommit() throws Exception {
+        if (transactions != null) {
+            if (transactions.isSupportsTransactions() && !transactions.isAutoCommit()) {
+                transactions.setAutoCommit(new VoidProgressMonitor(), true);
+            }
+        } else if (jdbc != null && !jdbc.getAutoCommit()) {
+            jdbc.setAutoCommit(true);
         }
     }
 

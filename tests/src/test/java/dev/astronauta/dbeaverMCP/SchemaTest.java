@@ -1,6 +1,7 @@
 package dev.astronauta.dbeaverMCP;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 import java.util.List;
 import java.util.Map;
@@ -45,5 +46,8 @@ public class SchemaTest {
         assertEquals(1, maxRows.get("minimum"));
         assertEquals(5000, maxRows.get("maximum"));
         assertEquals(100, maxRows.get("default"));
+        Map<String, Object> timeout = Schema.integer("Timeout", 1, 3600);
+        assertEquals(3600, timeout.get("maximum"));
+        assertFalse(timeout.containsKey("default"));
     }
 }

@@ -8,6 +8,7 @@ import dev.astronauta.dbeaverMCP.McpPlugin;
 import dev.astronauta.dbeaverMCP.McpPreferences;
 import dev.astronauta.dbeaverMCP.server.tools.BrowseTool;
 import dev.astronauta.dbeaverMCP.server.tools.DescribeTableTool;
+import dev.astronauta.dbeaverMCP.server.tools.ExecuteScriptTool;
 import dev.astronauta.dbeaverMCP.server.tools.ExecuteSqlTool;
 import dev.astronauta.dbeaverMCP.server.tools.GetDdlTool;
 import dev.astronauta.dbeaverMCP.server.tools.ListConnectionsTool;
@@ -52,8 +53,8 @@ public final class McpServerManager {
         new ListTriggersTool());
 
     /**
-     * Tools advertised for each access mode. {@code execute_sql} only exists
-     * in read/write mode; {@code query_sql} in read-only and read/write mode.
+     * Tools advertised for each access mode. {@code execute_sql} and {@code execute_script}
+     * only exist in read/write mode; {@code query_sql} in read-only and read/write mode.
      */
     private static List<McpTool> toolsFor(McpPreferences.AccessMode mode) {
         List<McpTool> tools = new ArrayList<>(METADATA_TOOLS);
@@ -62,6 +63,7 @@ public final class McpServerManager {
         }
         if (mode == McpPreferences.AccessMode.READ_WRITE) {
             tools.add(new ExecuteSqlTool());
+            tools.add(new ExecuteScriptTool());
         }
         return tools;
     }
@@ -73,7 +75,8 @@ public final class McpServerManager {
                 + "Use query_sql for reads (always read-only, up to 5000 rows per call).\n";
             case READ_WRITE -> INSTRUCTIONS_BASE
                 + "Use query_sql for reads (always read-only) and execute_sql for writes"
-                + " (one single statement per call).\n";
+                + " (one single statement per call). execute_script runs a whole multi-statement script,"
+                + " such as a migration file, statement by statement on one auto-commit session.\n";
         };
     }
 
